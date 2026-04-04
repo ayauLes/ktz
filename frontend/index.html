@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Locomotive Digital Twin</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app-shell">
+    <header class="topbar">
+        <div>
+            <div class="eyebrow">Realtime locomotive monitoring</div>
+            <h1>Digital Twin Cabin</h1>
+        </div>
+
+        <div class="topbar-right">
+            <div class="pill" id="connection_status">● Live</div>
+            <div class="pill" id="locomotive_id">LOCO-001</div>
+            <button class="ghost-btn" onclick="downloadCSV()">Export CSV (15 min)</button>
+        </div>
+    </header>
+
+    <main class="dashboard-grid">
+        <section class="hero-panel">
+            <div class="hero-left">
+                <div class="hero-card">
+                    <div class="hero-label">System health</div>
+                    <div id="health_value" class="health-value">--%</div>
+                    <div id="health_status" class="health-status">--</div>
+                    <div class="hero-subtext">Unified health score with explainable factors</div>
+                </div>
+
+                <div class="mini-cards">
+                    <div class="mini-card">
+                        <div class="mini-title">Fuel level</div>
+                        <div id="fuel_value" class="mini-value">--</div>
+                    </div>
+
+                    <div class="mini-card">
+                        <div class="mini-title">Fuel consumption</div>
+                        <div id="fuel_consumption_value" class="mini-value">--</div>
+                    </div>
+
+                    <div class="mini-card">
+                        <div class="mini-title">Voltage</div>
+                        <div id="voltage_value" class="mini-value">--</div>
+                        <div id="voltage_status" class="mini-sub">--</div>
+                    </div>
+
+                    <div class="mini-card">
+                        <div class="mini-title">Performance</div>
+                        <div id="performance_status" class="mini-value">--</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="hero-right">
+                <div class="status-card alert-card">
+                    <div class="section-title">Active alert</div>
+                    <div id="alert_value" class="alert-value">None</div>
+                </div>
+
+                <div class="status-card recommendation-card">
+                    <div class="section-title">Recommended action</div>
+                    <div id="recommendation" class="recommendation-text">No action required right now.</div>
+                </div>
+
+                <div class="status-card factors-card">
+                    <div class="section-title">Top factors</div>
+                    <ul id="top_factors_list" class="factor-list">
+                        <li>No significant factors</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel charts-panel">
+            <div class="panel-header">
+                <h2>Trend analysis</h2>
+                <div class="chart-controls">
+                    <button class="ghost-btn small-btn" onclick="setWindowSize(30)">30 pts</button>
+                    <button class="ghost-btn small-btn" onclick="setWindowSize(60)">60 pts</button>
+                    <button class="ghost-btn small-btn" onclick="resetZoomAll()">Reset zoom</button>
+                </div>
+            </div>
+
+            <div class="charts-grid">
+                <div class="chart-card">
+                    <div class="chart-title">Health index</div>
+                    <canvas id="healthChart"></canvas>
+                </div>
+
+                <div class="chart-card">
+                    <div class="chart-title">Temperature & pressure</div>
+                    <canvas id="tempPressureChart"></canvas>
+                </div>
+
+                <div class="chart-card">
+                    <div class="chart-title">Electrical load</div>
+                    <canvas id="electricalChart"></canvas>
+                </div>
+
+                <div class="chart-card">
+                    <div class="chart-title">Fuel trend</div>
+                    <canvas id="fuelChart"></canvas>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel map-panel">
+            <div class="panel-header">
+                <h2>Route position</h2>
+                <div class="map-meta">
+                    <span id="lat_value">Lat: --</span>
+                    <span id="lon_value">Lon: --</span>
+                </div>
+            </div>
+            <div id="map"></div>
+        </section>
+    </main>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
