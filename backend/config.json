@@ -1,0 +1,84 @@
+{
+  "_comment": "Конфигурация порогов и весов индекса здоровья. Изменения применяются без перезапуска сервера.",
+
+  "health": {
+    "engine_temp": {
+      "critical": 100,
+      "high":      95,
+      "elevated":  90,
+      "penalty_critical": -30,
+      "penalty_high":     -20,
+      "penalty_elevated": -10
+    },
+    "oil_temp": {
+      "critical": 95,
+      "high":     88,
+      "elevated": 82,
+      "penalty_critical": -20,
+      "penalty_high":     -12,
+      "penalty_elevated": -6
+    },
+    "fuel_level": {
+      "critical": 10,
+      "low":      20,
+      "penalty_critical": -20,
+      "penalty_low":      -10
+    },
+    "fuel_consumption": {
+      "high":     4.0,
+      "elevated": 3.2,
+      "penalty_high":     -8,
+      "penalty_elevated": -4
+    },
+    "brake_pressure": {
+      "critical": 3.5,
+      "low":      4.0,
+      "below_norm": 4.5,
+      "penalty_critical":   -30,
+      "penalty_low":        -20,
+      "penalty_below_norm": -10
+    },
+    "voltage": {
+      "min_critical": 23.2,
+      "max_critical": 24.8,
+      "min_normal":   23.5,
+      "max_normal":   24.5,
+      "penalty_critical": -15,
+      "penalty_offnorm":  -8
+    },
+    "current": {
+      "critical": 200,
+      "high":     180,
+      "elevated": 160,
+      "penalty_critical": -15,
+      "penalty_high":     -10,
+      "penalty_elevated": -5
+    },
+    "alert_penalty": {
+      "OVERHEAT":     -20,
+      "LOW_PRESSURE": -20,
+      "DEFAULT":      -10
+    }
+  },
+
+  "status_thresholds": {
+    "normal":   80,
+    "warning":  50
+  },
+
+  "ema": {
+    "alpha": 0.3
+  },
+
+  "queue": {
+    "max_size": 500,
+    "highload_batch": 10
+  },
+
+  "auth": {
+    "username": "admin",
+    "password": "ktz2025"
+  },
+
+  "history_hours": 72
+}

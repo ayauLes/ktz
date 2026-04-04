@@ -44,7 +44,7 @@ class TelemetryGenerator:
         self.tick = 0
 
         # Base values
-        self.locomotive_id = "LOCO-001"
+        self.locomotive_id = "kz8a"
         self.speed = 55.0
         self.fuel_level = 100.0
         self.fuel_consumption = 2.5

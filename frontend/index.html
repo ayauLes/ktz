@@ -1,132 +1,251 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Locomotive Digital Twin</title>
+    <title>KTZ · Цифровой двойник локомотива</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Barlow:wght@300;400;500;600;700;900&family=Barlow+Condensed:wght@400;600;700;900&display=swap" rel="stylesheet">
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
-
     <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div class="app-shell">
+
+<!-- Scan-line overlay for CRT effect -->
+<div class="scanlines" aria-hidden="true"></div>
+<div class="ambient-glow tl" aria-hidden="true"></div>
+<div class="ambient-glow br" aria-hidden="true"></div>
+
+<!-- ===== LOGIN SCREEN ===== -->
+<div id="login_screen" class="login-screen">
+    <div class="login-card">
+        <div class="login-logo">⬡</div>
+        <div class="login-eyebrow">КТЖ · СИСТЕМА МОНИТОРИНГА</div>
+        <h2 class="login-title">КАБИНА</h2>
+        <p class="login-subtitle">Цифровой двойник локомотива</p>
+
+        <div class="login-form">
+            <div class="login-field">
+                <label class="login-label" for="login_username">ЛОГИН</label>
+                <input class="login-input" id="login_username" type="text"
+                       autocomplete="username" placeholder="admin" spellcheck="false"/>
+            </div>
+            <div class="login-field">
+                <label class="login-label" for="login_password">ПАРОЛЬ</label>
+                <input class="login-input" id="login_password" type="password"
+                       autocomplete="current-password" placeholder="••••••••"/>
+            </div>
+            <div id="login_error" class="login-error" style="display:none">
+                Неверный логин или пароль
+            </div>
+            <button class="login-btn" id="login_btn" onclick="doLogin()">
+                <span id="login_btn_text">ВОЙТИ</span>
+                <span id="login_spinner" class="login-spinner" style="display:none">◌</span>
+            </button>
+        </div>
+        <div class="login-hint">Введите учётные данные для доступа к системе</div>
+    </div>
+</div>
+
+<!-- ===== MAIN DASHBOARD (hidden until login) ===== -->
+<div id="app_shell" class="app-shell" style="display:none">
+
+    <!-- ===== TOPBAR ===== -->
     <header class="topbar">
-        <div>
-            <div class="eyebrow">Realtime locomotive monitoring</div>
-            <h1>Digital Twin Cabin</h1>
+        <div class="topbar-brand">
+            <div class="brand-badge">
+                <span class="brand-icon">⬡</span>
+                <div>
+                    <div class="brand-eyebrow">КТЖ · СИСТЕМА МОНИТОРИНГА</div>
+                    <h1 class="brand-title">КАБИНА <span class="brand-subtitle">/ DIGITAL TWIN</span></h1>
+                </div>
+            </div>
         </div>
 
-        <div class="topbar-right">
-            <div class="pill" id="connection_status">● Live</div>
-            <div class="pill" id="locomotive_id">LOCO-001</div>
-            <button class="ghost-btn" onclick="downloadCSV()">Export CSV (15 min)</button>
+        <div class="topbar-center">
+            <div class="ticker-wrap">
+                <div class="ticker-label">ЛОКОМОТИВ</div>
+                <div class="ticker-value" id="locomotive_id">kz8a</div>
+            </div>
+            <div class="ticker-divider"></div>
+            <div class="ticker-wrap">
+                <div class="ticker-label">СТАТУС КАНАЛА</div>
+                <div class="ticker-value ws-status" id="connection_status">
+                    <span class="status-dot"></span> Подключение...
+                </div>
+            </div>
+        </div>
+
+        <div class="topbar-actions">
+            <button class="action-btn export-btn" onclick="downloadCSV()">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v8M4 6l3 3 3-3M2 11h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                Экспорт CSV
+            </button>
+            <button class="action-btn logout-btn" onclick="doLogout()">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M5 2H2v10h3M9 10l3-3-3-3M12 7H5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Выйти
+            </button>
+            <div class="clock-display" id="live_clock">--:--:--</div>
         </div>
     </header>
 
     <main class="dashboard-grid">
-        <section class="hero-panel">
-            <div class="hero-left">
-                <div class="hero-card">
-                    <div class="hero-label">System health</div>
-                    <div id="health_value" class="health-value">--%</div>
-                    <div id="health_status" class="health-status">--</div>
-                    <div class="hero-subtext">Unified health score with explainable factors</div>
-                </div>
 
-                <div class="mini-cards">
-                    <div class="mini-card">
-                        <div class="mini-title">Fuel level</div>
-                        <div id="fuel_value" class="mini-value">--</div>
-                    </div>
+        <!-- ===== HEALTH INDEX — BIG WIDGET ===== -->
+        <section class="health-section">
 
-                    <div class="mini-card">
-                        <div class="mini-title">Fuel consumption</div>
-                        <div id="fuel_consumption_value" class="mini-value">--</div>
-                    </div>
-
-                    <div class="mini-card">
-                        <div class="mini-title">Voltage</div>
-                        <div id="voltage_value" class="mini-value">--</div>
-                        <div id="voltage_status" class="mini-sub">--</div>
-                    </div>
-
-                    <div class="mini-card">
-                        <div class="mini-title">Performance</div>
-                        <div id="performance_status" class="mini-value">--</div>
-                    </div>
+            <!-- Main health ring -->
+            <div class="health-ring-wrap">
+                <svg class="health-ring-svg" viewBox="0 0 220 220" xmlns="http://www.w3.org/2000/svg">
+                    <!-- Background ring -->
+                    <circle class="ring-bg" cx="110" cy="110" r="90" fill="none" stroke-width="14"/>
+                    <!-- Tick marks -->
+                    <g id="ring-ticks"></g>
+                    <!-- Progress arc -->
+                    <circle class="ring-progress" id="ring_arc" cx="110" cy="110" r="90" fill="none" stroke-width="14"
+                            stroke-dasharray="565.49" stroke-dashoffset="565.49"
+                            stroke-linecap="round" transform="rotate(-90 110 110)"/>
+                    <!-- Inner glow circle -->
+                    <circle class="ring-glow" id="ring_glow" cx="110" cy="110" r="90" fill="none" stroke-width="24"
+                            stroke-dasharray="565.49" stroke-dashoffset="565.49"
+                            stroke-linecap="round" transform="rotate(-90 110 110)"/>
+                </svg>
+                <div class="health-ring-content">
+                    <div class="health-label-top">ИНДЕКС ЗДОРОВЬЯ</div>
+                    <div class="health-number" id="health_value">--</div>
+                    <div class="health-percent">%</div>
+                    <div class="health-status-badge" id="health_status">--</div>
                 </div>
             </div>
 
-            <div class="hero-right">
-                <div class="status-card alert-card">
-                    <div class="section-title">Active alert</div>
-                    <div id="alert_value" class="alert-value">None</div>
-                </div>
+            <!-- Subtext -->
+            <div class="health-footer">
+                Интегральный показатель состояния локомотива
+            </div>
+        </section>
 
-                <div class="status-card recommendation-card">
-                    <div class="section-title">Recommended action</div>
-                    <div id="recommendation" class="recommendation-text">No action required right now.</div>
-                </div>
+        <!-- ===== ALERT + RECOMMENDATION ===== -->
+        <section class="alert-section">
+            <div class="alert-block" id="alert_block">
+                <div class="block-eyebrow">АКТИВНЫЙ АЛЕРТ</div>
+                <div class="alert-code" id="alert_value">НЕТ</div>
+                <div class="alert-pulse-ring" id="alert_pulse"></div>
+            </div>
 
-                <div class="status-card factors-card">
-                    <div class="section-title">Top factors</div>
-                    <ul id="top_factors_list" class="factor-list">
-                        <li>No significant factors</li>
-                    </ul>
+            <div class="rec-block">
+                <div class="block-eyebrow">РЕКОМЕНДУЕМОЕ ДЕЙСТВИЕ</div>
+                <div class="rec-text" id="recommendation">Ожидание данных...</div>
+            </div>
+        </section>
+
+        <!-- ===== TOP FACTORS ===== -->
+        <section class="factors-section">
+            <div class="block-eyebrow">КЛЮЧЕВЫЕ ФАКТОРЫ ВЛИЯНИЯ</div>
+            <div class="factors-list" id="top_factors_list">
+                <div class="factor-item placeholder">
+                    <div class="factor-bar-wrap"><div class="factor-bar" style="width:0%"></div></div>
+                    <div class="factor-name">Ожидание данных...</div>
+                    <div class="factor-score">—</div>
                 </div>
             </div>
         </section>
 
-        <section class="panel charts-panel">
-            <div class="panel-header">
-                <h2>Trend analysis</h2>
+        <!-- ===== KPI STRIP ===== -->
+        <section class="kpi-strip">
+            <div class="kpi-card" id="kpi_fuel">
+                <div class="kpi-icon">⛽</div>
+                <div class="kpi-meta">
+                    <div class="kpi-label">ТОПЛИВО</div>
+                    <div class="kpi-value" id="fuel_value">--</div>
+                </div>
+                <div class="kpi-bar-wrap">
+                    <div class="kpi-bar-fill" id="fuel_bar"></div>
+                </div>
+            </div>
+
+            <div class="kpi-card">
+                <div class="kpi-icon">🔥</div>
+                <div class="kpi-meta">
+                    <div class="kpi-label">РАСХОД ТОПЛИВА</div>
+                    <div class="kpi-value" id="fuel_consumption_value">--</div>
+                </div>
+            </div>
+
+            <div class="kpi-card">
+                <div class="kpi-icon">⚡</div>
+                <div class="kpi-meta">
+                    <div class="kpi-label">НАПРЯЖЕНИЕ</div>
+                    <div class="kpi-value" id="voltage_value">--</div>
+                    <div class="kpi-sub" id="voltage_status">--</div>
+                </div>
+            </div>
+
+            <div class="kpi-card">
+                <div class="kpi-icon">🏎</div>
+                <div class="kpi-meta">
+                    <div class="kpi-label">ПРОИЗВОДИТЕЛЬНОСТЬ</div>
+                    <div class="kpi-value" id="performance_status">--</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ===== CHARTS ===== -->
+        <section class="charts-section">
+            <div class="section-header">
+                <h2 class="section-title">АНАЛИЗ ТРЕНДОВ</h2>
                 <div class="chart-controls">
-                    <button class="ghost-btn small-btn" onclick="setWindowSize(30)">30 pts</button>
-                    <button class="ghost-btn small-btn" onclick="setWindowSize(60)">60 pts</button>
-                    <button class="ghost-btn small-btn" onclick="resetZoomAll()">Reset zoom</button>
+                    <span class="ctrl-label">ОКНО:</span>
+                    <button id="btn_30s" class="ctrl-btn time-btn" onclick="setTimeWindow(30,'btn_30s')">30с</button>
+                    <button id="btn_2m" class="ctrl-btn time-btn" onclick="setTimeWindow(120,'btn_2m')">2мин</button>
+                    <button id="btn_5m" class="ctrl-btn time-btn" onclick="setTimeWindow(300,'btn_5m')">5мин</button>
+                    <button id="btn_15m" class="ctrl-btn time-btn active-btn" onclick="setTimeWindow(900,'btn_15m')">15мин</button>
+                    <button class="ctrl-btn" onclick="resetZoomAll()">↺ ЗУМ</button>
                 </div>
             </div>
 
             <div class="charts-grid">
                 <div class="chart-card">
-                    <div class="chart-title">Health index</div>
+                    <div class="chart-label">ИНДЕКС ЗДОРОВЬЯ</div>
                     <canvas id="healthChart"></canvas>
                 </div>
-
                 <div class="chart-card">
-                    <div class="chart-title">Temperature & pressure</div>
+                    <div class="chart-label">ТЕМПЕРАТУРА И ДАВЛЕНИЕ</div>
                     <canvas id="tempPressureChart"></canvas>
                 </div>
-
                 <div class="chart-card">
-                    <div class="chart-title">Electrical load</div>
+                    <div class="chart-label">ЭЛЕКТРИЧЕСКАЯ НАГРУЗКА</div>
                     <canvas id="electricalChart"></canvas>
                 </div>
-
                 <div class="chart-card">
-                    <div class="chart-title">Fuel trend</div>
+                    <div class="chart-label">ТОПЛИВО</div>
                     <canvas id="fuelChart"></canvas>
                 </div>
             </div>
         </section>
 
-        <section class="panel map-panel">
-            <div class="panel-header">
-                <h2>Route position</h2>
-                <div class="map-meta">
-                    <span id="lat_value">Lat: --</span>
-                    <span id="lon_value">Lon: --</span>
+        <!-- ===== MAP ===== -->
+        <section class="map-section">
+            <div class="section-header">
+                <h2 class="section-title">ПОЛОЖЕНИЕ НА МАРШРУТЕ</h2>
+                <div class="map-coords">
+                    <span id="lat_value">ШИР: --</span>
+                    <span class="coord-sep">·</span>
+                    <span id="lon_value">ДОЛ: --</span>
                 </div>
             </div>
             <div id="map"></div>
         </section>
+
     </main>
-</div>
+</div><!-- /#app_shell -->
 
 <script src="app.js"></script>
 </body>
