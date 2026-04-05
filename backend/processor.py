@@ -1,8 +1,8 @@
 """
-processor.py — Обработчик телеметрии локомотива (КТЖ)
+processor.py — Обработчик телеметрии локомотива (КТЖ) v2
 
 Читает raw_telemetry → вычисляет индекс здоровья → пишет в processed_telemetry.
-Пороги и веса берёт из config.json (без перекомпиляции).
+Поддерживает динамическое переключение интервала через interval.cfg
 """
 
 import json
@@ -11,9 +11,6 @@ import os
 import sqlite3
 import time
 
-# ═══════════════════════════════════════════════════════
-# LOGGING
-# ═══════════════════════════════════════════════════════
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -21,13 +18,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger("ktz.processor")
 
-# ═══════════════════════════════════════════════════════
-# CONFIG
-# ═══════════════════════════════════════════════════════
 CONFIG_PATH    = os.path.join(os.path.dirname(__file__), "config.json")
+INTERVAL_FILE  = "interval.cfg"
 DB_PATH        = "rawdata.db"
-INTERVAL_SECONDS = 0.5
-CONFIG_RELOAD_INTERVAL = 30   # перечитываем конфиг каждые 30 с
+DEFAULT_INTERVAL = 0.5
+CONFIG_RELOAD_INTERVAL = 30
+
+
+def read_interval():
+    """Read interval from shared file (written by server on /set_interval)."""
+    try:
+        if os.path.exists(INTERVAL_FILE):
+            with open(INTERVAL_FILE, "r") as f:
+                val = float(f.read().strip())
+                return max(0.01, min(2.0, val))
+    except Exception:
+        pass
+    return DEFAULT_INTERVAL
 
 
 def load_config() -> dict:
@@ -46,15 +53,12 @@ _config_last_loaded = time.time()
 
 
 def maybe_reload_config():
-    """Перечитывает конфиг раз в CONFIG_RELOAD_INTERVAL секунд."""
     global CONFIG, _config_last_loaded
     if time.time() - _config_last_loaded > CONFIG_RELOAD_INTERVAL:
         CONFIG = load_config()
         _config_last_loaded = time.time()
 
-# ═══════════════════════════════════════════════════════
-# DB HELPERS
-# ═══════════════════════════════════════════════════════
+
 def get_connection():
     return sqlite3.connect(DB_PATH)
 
@@ -137,9 +141,7 @@ def insert_processed_row(raw_row, health, status, reasons, top_factors,
     conn.commit()
     conn.close()
 
-# ═══════════════════════════════════════════════════════
-# HEALTH CALCULATION — использует пороги из конфига
-# ═══════════════════════════════════════════════════════
+
 def calculate_voltage_status(voltage: float) -> str:
     vcfg = CONFIG.get("health", {}).get("voltage", {})
     mn  = vcfg.get("min_normal",   23.5)
@@ -184,7 +186,6 @@ def build_recommendation(health, reasons, alert_code,
 
 
 def calculate_health(row: tuple):
-    """Вычисляет индекс здоровья по порогам из config.json."""
     (_, _, _, speed, fuel_level, fuel_consumption,
      engine_temp, oil_temp, brake_pressure,
      voltage, current, alert_code, lat, lon) = row
@@ -195,7 +196,6 @@ def calculate_health(row: tuple):
     health = 100
     factor_impacts = []
 
-    # --- Температура двигателя ---
     et = h_cfg.get("engine_temp", {})
     if engine_temp >= et.get("critical", 100):
         factor_impacts.append(("Критическая температура двигателя", et.get("penalty_critical", -30)))
@@ -204,7 +204,6 @@ def calculate_health(row: tuple):
     elif engine_temp >= et.get("elevated", 90):
         factor_impacts.append(("Рост температуры двигателя", et.get("penalty_elevated", -10)))
 
-    # --- Температура масла ---
     ot = h_cfg.get("oil_temp", {})
     if oil_temp >= ot.get("critical", 95):
         factor_impacts.append(("Критическая температура масла", ot.get("penalty_critical", -20)))
@@ -213,21 +212,18 @@ def calculate_health(row: tuple):
     elif oil_temp >= ot.get("elevated", 82):
         factor_impacts.append(("Рост температуры масла", ot.get("penalty_elevated", -6)))
 
-    # --- Уровень топлива ---
     fl = h_cfg.get("fuel_level", {})
     if fuel_level <= fl.get("critical", 10):
         factor_impacts.append(("Критически низкий уровень топлива", fl.get("penalty_critical", -20)))
     elif fuel_level <= fl.get("low", 20):
         factor_impacts.append(("Низкий уровень топлива", fl.get("penalty_low", -10)))
 
-    # --- Расход топлива ---
     fc = h_cfg.get("fuel_consumption", {})
     if fuel_consumption >= fc.get("high", 4.0):
         factor_impacts.append(("Повышенный расход топлива", fc.get("penalty_high", -8)))
     elif fuel_consumption >= fc.get("elevated", 3.2):
         factor_impacts.append(("Рост расхода топлива", fc.get("penalty_elevated", -4)))
 
-    # --- Давление тормозов ---
     bp = h_cfg.get("brake_pressure", {})
     if brake_pressure < bp.get("critical", 3.5):
         factor_impacts.append(("Критическое давление тормозной системы", bp.get("penalty_critical", -30)))
@@ -236,14 +232,12 @@ def calculate_health(row: tuple):
     elif brake_pressure < bp.get("below_norm", 4.5):
         factor_impacts.append(("Давление тормозной системы ниже нормы", bp.get("penalty_below_norm", -10)))
 
-    # --- Напряжение ---
     vc = h_cfg.get("voltage", {})
     if voltage < vc.get("min_critical", 23.2) or voltage > vc.get("max_critical", 24.8):
         factor_impacts.append(("Критическое отклонение напряжения", vc.get("penalty_critical", -15)))
     elif voltage < vc.get("min_normal", 23.5) or voltage > vc.get("max_normal", 24.5):
         factor_impacts.append(("Напряжение вне нормального диапазона", vc.get("penalty_offnorm", -8)))
 
-    # --- Ток ---
     cc = h_cfg.get("current", {})
     if current > cc.get("critical", 200):
         factor_impacts.append(("Критическая токовая нагрузка", cc.get("penalty_critical", -15)))
@@ -252,7 +246,6 @@ def calculate_health(row: tuple):
     elif current > cc.get("elevated", 160):
         factor_impacts.append(("Повышенная токовая нагрузка", cc.get("penalty_elevated", -5)))
 
-    # --- Алерты ---
     ap = h_cfg.get("alert_penalty", {})
     if alert_code == "OVERHEAT":
         factor_impacts.append(("Активная авария OVERHEAT", ap.get("OVERHEAT", -20)))
@@ -261,14 +254,12 @@ def calculate_health(row: tuple):
     elif alert_code:
         factor_impacts.append((f"Активный alert: {alert_code}", ap.get("DEFAULT", -10)))
 
-    # Применяем штрафы
     reasons = []
     for reason, impact in factor_impacts:
         health += impact
         reasons.append(reason)
     health = max(0, min(100, health))
 
-    # Статус
     if health >= st_cfg.get("normal", 80):
         status = "Норма"
     elif health >= st_cfg.get("warning", 50):
@@ -292,17 +283,17 @@ def calculate_health(row: tuple):
 
     return health, status, reasons, top_factors, recommendation, voltage_status, performance_status
 
-# ═══════════════════════════════════════════════════════
-# MAIN LOOP
-# ═══════════════════════════════════════════════════════
+
 def main():
     init_db()
     logger.info("Processor запущен. Читаю raw_telemetry → processed_telemetry...")
+    logger.info("Интервал управляется через %s (по умолчанию %.1fs)", INTERVAL_FILE, DEFAULT_INTERVAL)
 
     processed_count = 0
 
     while True:
-        maybe_reload_config()   # горячая перезагрузка конфига
+        maybe_reload_config()
+        interval = read_interval()
 
         last_raw_id = get_last_processed_raw_id()
         new_rows    = get_new_raw_rows(last_raw_id)
@@ -318,14 +309,13 @@ def main():
                 )
                 processed_count += 1
 
-            # Логируем последний обработанный батч
             last = new_rows[-1]
             logger.info(
-                "Обработано %d строк (всего %d) | id=%d | health=%d%% [%s] | alert=%s",
-                len(new_rows), processed_count, last[0], health, status, last[11] or "—"
+                "Обработано %d строк (всего %d) | id=%d | health=%d%% [%s] | alert=%s | interval=%.3fs",
+                len(new_rows), processed_count, last[0], health, status, last[11] or "—", interval
             )
 
-        time.sleep(INTERVAL_SECONDS)
+        time.sleep(interval)
 
 
 if __name__ == "__main__":

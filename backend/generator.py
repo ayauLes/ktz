@@ -2,10 +2,26 @@ import sqlite3
 import time
 import random
 import math
+import os
 from datetime import datetime, timezone
 
 DB_PATH = "rawdata.db"
-INTERVAL_SECONDS = 0.5
+INTERVAL_FILE = "interval.cfg"  # shared config for dynamic interval switching
+
+# ─── Default interval (500ms = 1x, switch to 50ms for 10x highload) ───
+DEFAULT_INTERVAL = 0.5
+
+
+def read_interval():
+    """Read interval from shared file (written by server on toggle)."""
+    try:
+        if os.path.exists(INTERVAL_FILE):
+            with open(INTERVAL_FILE, "r") as f:
+                val = float(f.read().strip())
+                return max(0.01, min(2.0, val))
+    except Exception:
+        pass
+    return DEFAULT_INTERVAL
 
 
 def get_connection():
@@ -43,7 +59,6 @@ class TelemetryGenerator:
     def __init__(self):
         self.tick = 0
 
-        # Base values
         self.locomotive_id = "kz8a"
         self.speed = 55.0
         self.fuel_level = 100.0
@@ -55,7 +70,6 @@ class TelemetryGenerator:
         self.current = 120.0
         self.alert_code = None
 
-        # Map (starting point)
         self.lat = 51.1605
         self.lon = 71.4704
 
@@ -297,13 +311,15 @@ def main():
     init_db()
     generator = TelemetryGenerator()
 
-    print("Generator started. Writing telemetry to rawdata.db every 500 ms...")
+    print("Generator started. Writing telemetry to rawdata.db...")
+    print(f"Default interval: {DEFAULT_INTERVAL}s. Switch via {INTERVAL_FILE} or API /set_interval")
 
     while True:
+        interval = read_interval()
         data = generator.generate()
         insert_raw_telemetry(data)
         print(data)
-        time.sleep(INTERVAL_SECONDS)
+        time.sleep(interval)
 
 
 if __name__ == "__main__":

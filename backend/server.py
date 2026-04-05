@@ -579,3 +579,63 @@ def reload_config(username: str = Depends(require_auth)):
         "ema_alpha":    new_alpha,
         "auth_user":    new_user,
     }
+
+# ═══════════════════════════════════════════════════════
+# SET INTERVAL ENDPOINT — переключение скорости генерации
+# ═══════════════════════════════════════════════════════
+from pydantic import BaseModel
+
+class IntervalRequest(BaseModel):
+    interval_ms: int  # 500 = 1x (normal), 50 = 10x (highload)
+
+INTERVAL_FILE = os.path.join(_SERVER_DIR, "interval.cfg")
+
+@app.post(
+    "/set_interval",
+    tags=["Config"],
+    summary="Переключить интервал генерации телеметрии",
+)
+def set_interval(req: IntervalRequest, username: str = Depends(require_auth)):
+    """
+    Записывает новый интервал (в секундах) в interval.cfg.
+    generator.py и processor.py читают его при каждой итерации.
+    interval_ms=500 → 1x (штатный режим)
+    interval_ms=50  → 10x (highload тест)
+    """
+    interval_sec = max(0.01, req.interval_ms / 1000.0)
+    try:
+        with open(INTERVAL_FILE, "w") as f:
+            f.write(str(interval_sec))
+        mode = "10x HIGHLOAD" if interval_sec < 0.1 else "1x NORMAL"
+        logger.info("⚡ Интервал установлен: %.3fs (%s) — пользователь: %s", interval_sec, mode, username)
+        return {
+            "status": "ok",
+            "interval_ms": req.interval_ms,
+            "interval_sec": interval_sec,
+            "mode": mode,
+        }
+    except Exception as e:
+        logger.error("Ошибка записи interval.cfg: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get(
+    "/get_interval",
+    tags=["Config"],
+    summary="Получить текущий интервал",
+)
+def get_interval_endpoint():
+    """Возвращает текущий интервал генерации."""
+    try:
+        if os.path.exists(INTERVAL_FILE):
+            with open(INTERVAL_FILE, "r") as f:
+                sec = float(f.read().strip())
+        else:
+            sec = 0.5
+        return {
+            "interval_sec": sec,
+            "interval_ms": int(sec * 1000),
+            "mode": "10x HIGHLOAD" if sec < 0.1 else "1x NORMAL",
+        }
+    except Exception:
+        return {"interval_sec": 0.5, "interval_ms": 500, "mode": "1x NORMAL"}

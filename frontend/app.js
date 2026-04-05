@@ -638,6 +638,46 @@ function updateUI(data) {
 }
 
 // ═══════════════════════════════════════════════════════
+// THEME TOGGLE
+// ═══════════════════════════════════════════════════════
+const THEME_KEY = 'ktz_theme';
+
+function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    const icon = document.getElementById('theme_icon');
+    if (icon) icon.textContent = theme === 'light' ? '🌙' : '☀';
+    localStorage.setItem(THEME_KEY, theme);
+}
+
+function toggleTheme() {
+    const cur = document.documentElement.getAttribute('data-theme') || 'dark';
+    applyTheme(cur === 'dark' ? 'light' : 'dark');
+    updateAllChartsTheme();
+}
+
+(function() {
+    const saved = localStorage.getItem(THEME_KEY) || 'dark';
+    applyTheme(saved);
+})();
+
+// ═══════════════════════════════════════════════════════
+// HIGHLOAD TOGGLE
+// ═══════════════════════════════════════════════════════
+let _isHighload = false;
+
+function toggleHighload(enabled) {
+    _isHighload = enabled;
+    const label = document.getElementById('highload_label');
+    if (label) label.textContent = enabled ? '10x' : '1x';
+    fetch(`${BASE_URL}/set_interval`, {
+        method: 'POST',
+        headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ interval_ms: enabled ? 50 : 500 })
+    }).catch(() => {});
+}
+
+
+// ═══════════════════════════════════════════════════════
 // WEBSOCKET — exponential backoff reconnect
 // ═══════════════════════════════════════════════════════
 let ws;
@@ -732,8 +772,174 @@ function connectWS() {
 // ═══════════════════════════════════════════════════════
 // MESSAGE PROCESSOR (called from RAF drain)
 // ═══════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════
+// SPEED ARC
+// ═══════════════════════════════════════════════════════
+const SPEED_MAX = 120;
+const SPEED_CIRCUMFERENCE = 2 * Math.PI * 55;
+const SPEED_ARC_FRACTION  = 0.75;
+
+function updateSpeedArc(speed) {
+    const arc = document.getElementById("speed_arc");
+    const val = document.getElementById("speed_dial_val");
+    if (!arc) return;
+    const pct    = Math.max(0, Math.min(1, speed / SPEED_MAX));
+    const filled = SPEED_ARC_FRACTION * SPEED_CIRCUMFERENCE * pct;
+    const empty  = SPEED_CIRCUMFERENCE - filled;
+    arc.setAttribute("stroke-dasharray", `${filled.toFixed(2)} ${(SPEED_CIRCUMFERENCE - filled + (SPEED_CIRCUMFERENCE * 0.25)).toFixed(2)}`);
+    const color = speed > 80 ? "#ff3b3b" : speed > 60 ? "#ffcc00" : "#00e5ff";
+    arc.style.stroke = color;
+    if (val) val.textContent = Math.round(speed);
+}
+
+// ═══════════════════════════════════════════════════════
+// ALERT HISTORY
+// ═══════════════════════════════════════════════════════
+const _alertHistory = [];
+const MAX_ALERT_HIST = 8;
+
+function pushAlertHistory(code, timestamp) {
+    if (!code || code === "null" || code === "None") return;
+    const last = _alertHistory[0];
+    if (last && last.code === code) return;
+    _alertHistory.unshift({ code, time: new Date(timestamp).toLocaleTimeString("ru-RU") });
+    if (_alertHistory.length > MAX_ALERT_HIST) _alertHistory.pop();
+    renderAlertHistory();
+}
+
+function renderAlertHistory() {
+    const el = document.getElementById("alert_hist_list");
+    if (!el) return;
+    if (_alertHistory.length === 0) {
+        el.innerHTML = '<div class="alert-hist-empty">Алертов нет</div>';
+        return;
+    }
+    el.innerHTML = _alertHistory.map(a => `
+        <div class="alert-hist-item">
+            <span class="alert-hist-code">${a.code}</span>
+            <span class="alert-hist-time">${a.time}</span>
+        </div>
+    `).join("");
+}
+
+// ═══════════════════════════════════════════════════════
+// DISTANCE TRACKING
+// ═══════════════════════════════════════════════════════
+let _totalDistKm = 0;
+let _lastLatLon   = null;
+
+function updateDistance(lat, lon) {
+    if (_lastLatLon) {
+        const [lt, ln] = _lastLatLon;
+        const R = 6371;
+        const dLat = (lat - lt) * Math.PI / 180;
+        const dLon = (lon - ln) * Math.PI / 180;
+        const a = Math.sin(dLat/2)**2 + Math.cos(lt*Math.PI/180)*Math.cos(lat*Math.PI/180)*Math.sin(dLon/2)**2;
+        _totalDistKm += R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+    _lastLatLon = [lat, lon];
+    const el = document.getElementById("dist_value");
+    if (el) el.textContent = `ДИСТ: ${_totalDistKm.toFixed(2)} КМ`;
+}
+
+// ═══════════════════════════════════════════════════════
+// PANELS UPDATE
+// ═══════════════════════════════════════════════════════
+function updatePanels(data) {
+    const speed = toNumber(data.speed) ?? 0;
+    const fuel  = toNumber(data.fuel_level) ?? 0;
+    const cons  = toNumber(data.fuel_consumption) ?? 0;
+    const curr  = toNumber(data.current) ?? 0;
+    const vol   = toNumber(data.voltage) ?? 0;
+    const eng   = toNumber(data.engine_temp) ?? 0;
+    const oil   = toNumber(data.oil_temp) ?? 0;
+    const brk   = toNumber(data.brake_pressure) ?? 0;
+
+    updateSpeedArc(speed);
+
+    // Fuel/Energy bars
+    setText("fe_fuel_level", `${Math.round(fuel)}%`);
+    setText("fe_consumption", cons.toFixed(2));
+    setText("fe_current", `${Math.round(curr)} А`);
+    const fuelEl = document.getElementById("fe_fuel_bar");
+    if (fuelEl) {
+        fuelEl.style.width = `${fuel}%`;
+        fuelEl.style.background = fuel < 20 ? "linear-gradient(90deg,#ff3b3b,rgba(255,59,59,0.4))" :
+            fuel < 40 ? "linear-gradient(90deg,#ffcc00,rgba(255,204,0,0.4))" :
+                "linear-gradient(90deg,#00ff9d,rgba(0,255,157,0.4))";
+    }
+    const consEl = document.getElementById("fe_cons_bar");
+    if (consEl) consEl.style.width = `${Math.min(100, cons / 5.0 * 100).toFixed(0)}%`;
+    const currEl = document.getElementById("fe_curr_bar");
+    if (currEl) currEl.style.width = `${Math.min(100, curr / 220 * 100).toFixed(0)}%`;
+
+    // Pressure / Temp
+    const engColor = eng >= 100 ? "var(--bad)" : eng >= 90 ? "var(--warn)" : "var(--good)";
+    const oilColor = oil >= 95  ? "var(--bad)" : oil >= 82 ? "var(--warn)" : "var(--good)";
+    const brkColor = brk < 3.5  ? "var(--bad)" : brk < 4.5 ? "var(--warn)" : "var(--good)";
+    const ptEng = document.getElementById("pt_engine_temp");
+    const ptOil = document.getElementById("pt_oil_temp");
+    const ptBrk = document.getElementById("pt_brake");
+    if (ptEng) { ptEng.textContent = `${eng.toFixed(1)} °C`;    ptEng.style.color = engColor; }
+    if (ptOil) { ptOil.textContent = `${oil.toFixed(1)} °C`;    ptOil.style.color = oilColor; }
+    if (ptBrk) { ptBrk.textContent = `${brk.toFixed(2)} бар`;  ptBrk.style.color = brkColor; }
+
+    // Electrical
+    const volColor = (vol >= 23.5 && vol <= 24.5) ? "var(--good)" : (vol >= 23.2 && vol <= 24.8) ? "var(--warn)" : "var(--bad)";
+    const elVol = document.getElementById("elec_voltage");
+    const elCur = document.getElementById("elec_current");
+    const elSta = document.getElementById("elec_status");
+    const elLoa = document.getElementById("elec_load");
+    if (elVol) { elVol.textContent = vol.toFixed(2); elVol.style.color = volColor; }
+    if (elCur) { elCur.textContent = Math.round(curr); elCur.style.color = curr > 200 ? "var(--bad)" : curr > 160 ? "var(--warn)" : "var(--good)"; }
+    if (elSta) { elSta.textContent = data.voltage_status || "--"; elSta.style.color = volColor; }
+    if (elLoa) {
+        const pct = Math.min(100, Math.round(curr / 220 * 100));
+        elLoa.textContent = pct;
+        elLoa.style.color = pct > 90 ? "var(--bad)" : pct > 70 ? "var(--warn)" : "var(--good)";
+    }
+
+    // Alert history
+    const code = data.alert_code && data.alert_code !== "null" ? data.alert_code : null;
+    pushAlertHistory(code, data.timestamp);
+
+    // Distance
+    const lat = toNumber(data.lat);
+    const lon = toNumber(data.lon);
+    if (lat !== null && lon !== null) updateDistance(lat, lon);
+}
+
+// ═══════════════════════════════════════════════════════
+// CHART THEME REFRESH
+// ═══════════════════════════════════════════════════════
+function updateAllChartsTheme() {
+    const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+    const tickColor   = isLight ? 'rgba(45,74,110,0.4)'   : 'rgba(200,223,245,0.3)';
+    const gridColor   = isLight ? 'rgba(0,0,0,0.05)'      : 'rgba(255,255,255,0.04)';
+    const legendColor = isLight ? 'rgba(45,74,110,0.7)'   : 'rgba(200,223,245,0.55)';
+    const tooltipBg   = isLight ? 'rgba(255,255,255,0.97)': 'rgba(6,14,26,0.95)';
+    const tooltipTitle = isLight ? 'rgba(45,74,110,0.6)'  : 'rgba(200,223,245,0.6)';
+    const tooltipBody  = isLight ? '#1a2f4a'              : '#e8f4ff';
+
+    [healthChart, tempPressureChart, electricalChart, fuelChart].forEach(ch => {
+        ch.options.scales.x.ticks.color  = tickColor;
+        ch.options.scales.y.ticks.color  = tickColor;
+        ch.options.scales.x.grid.color   = gridColor;
+        ch.options.scales.y.grid.color   = gridColor;
+        ch.options.plugins.legend.labels.color = legendColor;
+        ch.options.plugins.tooltip.backgroundColor = tooltipBg;
+        ch.options.plugins.tooltip.titleColor      = tooltipTitle;
+        ch.options.plugins.tooltip.bodyColor       = tooltipBody;
+        ch.update('none');
+    });
+}
+
+// ═══════════════════════════════════════════════════════
+// MESSAGE PROCESSOR (called from RAF drain)
+// ═══════════════════════════════════════════════════════
 function processMessage(data) {
     updateUI(data);
+    updatePanels(data);
     pushPoint(data.timestamp, data);
 
     const lat = toNumber(data.lat);
